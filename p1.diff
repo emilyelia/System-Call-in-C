@@ -1,0 +1,95 @@
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl b/arch/x86/entry/syscalls/syscall_64.tbl
+index f0b1709a5ffb..56d5eb4513ea 100644
+--- a/arch/x86/entry/syscalls/syscall_64.tbl
++++ b/arch/x86/entry/syscalls/syscall_64.tbl
+@@ -343,7 +343,8 @@
+ 332	common	statx			__x64_sys_statx
+ 333	common	io_pgetevents		__x64_sys_io_pgetevents
+ 334	common	rseq			__x64_sys_rseq
+-
++335     common  set_access_level       __x64_sys_set_access_level
++336     common  get_acess_level        __x64_sys_get_access_level
+ #
+ # x32-specific system call numbers start at 512 to avoid cache impact
+ # for native 64-bit operation. The __x32_compat_sys stubs are created
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index a6c699f5ceb4..b3a605935a54 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -612,7 +612,7 @@ struct task_struct {
+ 	/* Per task flags (PF_*), defined further below: */
+ 	unsigned int			flags;
+ 	unsigned int			ptrace;
+-
++	int                             accesslevel;
+ #ifdef CONFIG_SMP
+ 	struct llist_node		wake_entry;
+ 	int				on_cpu;
+diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
+index 5c1a0933768e..57cb8ef60d13 100644
+--- a/include/linux/syscalls.h
++++ b/include/linux/syscalls.h
+@@ -1281,5 +1281,6 @@ static inline long ksys_truncate(const char __user *pathname, loff_t length)
+ {
+ 	return do_sys_truncate(pathname, length);
+ }
+-
++asmlinkage long sys_set_accesss_level (int pid, int new_level);
++asmlinkage long sys_get_access_level(int pid);
+ #endif
+diff --git a/kernel/fork.c b/kernel/fork.c
+index c21b4e1f29f8..e6a172e4e8fa 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1586,6 +1586,7 @@ static inline void rcu_copy_process(struct task_struct *p)
+ {
+ #ifdef CONFIG_PREEMPT_RCU
+ 	p->rcu_read_lock_nesting = 0;
++	p->accesslevel=0;
+ 	p->rcu_read_unlock_special.s = 0;
+ 	p->rcu_blocked_node = NULL;
+ 	INIT_LIST_HEAD(&p->rcu_node_entry);
+diff --git a/kernel/sys.c b/kernel/sys.c
+index af8ced3857b7..d8c2303d14a1 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -2793,4 +2793,39 @@ COMPAT_SYSCALL_DEFINE1(sysinfo, struct compat_sysinfo __user *, info)
+ 
+ 	return 0;
+ }
++
++SYSCALL_DEFINE2(set_access_level, int, pid, int, new_level) {
++struct task_struct *process = find_task_by_vpid(pid);
++//if userid==0 it is sudo and it can do what it wants
++
++if(process->pid ==pid) {
++
++if(get_current_user()->uid.val ==0){
++process->accesslevel= new_level;
++return new_level;
++}
++if((current->pid ==pid) && (process->accesslevel >=new_level)){
++process->accesslevel =new_level;
++return new_level;
++}
++if((current->accesslevel > process->accesslevel) && (current->accesslevel >=new_level)) {
++process->accesslevel = new_level;
++return new_level;
++}
++}
++return -1;
++
++}
++
++SYSCALL_DEFINE1(get_access_level, int, pid){
++struct task_struct *result;
++
++for_each_process(result) {
++if(result->pid==pid) {
++return result->accesslevel;
++
++}
++}
++return -1;
++}
+ #endif /* CONFIG_COMPAT */
